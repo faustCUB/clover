@@ -1,0 +1,8 @@
+telethon==1.40.0
+aiohttp
+rich
+pyzbar
+requests
+fake_useragent
+whois
+yt-dlp
