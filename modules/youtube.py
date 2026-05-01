@@ -74,12 +74,11 @@ async def _yt(event):
         return
 
     title = _safe_name(info.get("title", "video"))
-    uid = str(int(time.time()))
     sent_count = 0
 
     if mode in ("video", "both"):
         await event.edit(f"🍀 **Загрузка видео...**\n`{title}`")
-        v_path = os.path.join(_DOWNLOAD_DIR, f"{uid}_v_{title}.mp4")
+        v_path = os.path.join(_DOWNLOAD_DIR, f"{title} (CloverUserBot).mp4")
         v_opts = {
             "format": "best[height<=720][ext=mp4]/best[height<=720]/best",
             "outtmpl": v_path,
@@ -102,8 +101,8 @@ async def _yt(event):
 
     if mode in ("audio", "both"):
         await event.edit(f"🍀 **Загрузка аудио...**\n`{title}`")
-        a_path_tpl = os.path.join(_DOWNLOAD_DIR, f"{uid}_a_{title}.%(ext)s")
-        a_path_final = os.path.join(_DOWNLOAD_DIR, f"{uid}_a_{title}.mp3")
+        a_path_tpl = os.path.join(_DOWNLOAD_DIR, f"{title} (CloverUserBot).%(ext)s")
+        a_path_final = os.path.join(_DOWNLOAD_DIR, f"{title} (CloverUserBot).mp3")
         a_opts = {
             "format": "bestaudio/best",
             "outtmpl": a_path_tpl,

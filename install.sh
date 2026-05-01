@@ -122,13 +122,10 @@ install_requirements() {
     echo -e "  ${GREEN}│${RESET}"
 
     while IFS= read -r pkg || [ -n "$pkg" ]; do
-        # пропускаем пустые строки и комментарии
         [[ -z "$pkg" || "$pkg" =~ ^[[:space:]]*# ]] && continue
 
-        # берём только имя без версии
         pkg_name=$(echo "$pkg" | sed 's/[>=<!;\[].*//' | tr -d '[:space:]')
 
-        # спиннер для текущего пакета
         (
             local i=0
             tput civis 2>/dev/null
