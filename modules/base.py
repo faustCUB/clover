@@ -16,7 +16,7 @@ DISABLED_FILE = Path("disabled_modules.json")
 REPO_OWNER = "faustCUB"
 REPO_NAME = "clover"
 BRANCH = "main"
-BOT_ROOT = Path(__file__).parent.resolve()
+BOT_ROOT = Path(__file__).parent.parent.resolve()
 
 
 def pluralize(n: int, one: str, few: str, many: str) -> str:
