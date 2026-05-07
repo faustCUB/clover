@@ -1,11 +1,21 @@
 import re
 import json
+import shutil
+import hashlib
+import tarfile
+import tempfile
+import requests
 from pathlib import Path
 from dataclasses import dataclass, field
 from telethon import TelegramClient, events
 from utils import logger
 
 DISABLED_FILE = Path("disabled_modules.json")
+
+REPO_OWNER = "faustCUB"
+REPO_NAME = "clover"
+BRANCH = "main"
+BOT_ROOT = Path(__file__).parent.resolve()
 
 
 def pluralize(n: int, one: str, few: str, many: str) -> str:
@@ -30,6 +40,74 @@ def load_disabled() -> set:
 
 def save_disabled(disabled: set) -> None:
     DISABLED_FILE.write_text(json.dumps(list(disabled)))
+
+
+def _file_hash(path: Path) -> str:
+    h = hashlib.md5()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
+
+def _collect_github_files(extract_root: Path) -> dict[Path, Path]:
+    subdirs = [d for d in extract_root.iterdir() if d.is_dir()]
+    if not subdirs:
+        return {}
+    repo_dir = subdirs[0]
+
+    result = {}
+    for file in repo_dir.rglob("*"):
+        if file.is_file():
+            rel = file.relative_to(repo_dir)
+            result[rel] = file
+    return result
+
+
+def run_update() -> tuple[bool, list[str], list[str]]:
+    url = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/archive/refs/heads/{BRANCH}.tar.gz"
+    tmp_dir = Path(tempfile.mkdtemp(prefix="clover_update_"))
+
+    try:
+        archive_path = tmp_dir / "update.tar.gz"
+        extract_path = tmp_dir / "extracted"
+        extract_path.mkdir()
+
+        logger.info("Загружаю архив с GitHub...")
+        response = requests.get(url, stream=True, timeout=30)
+        response.raise_for_status()
+
+        with open(archive_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        logger.info("Распаковываю архив...")
+        with tarfile.open(archive_path) as tar:
+            tar.extractall(extract_path)
+
+        github_files = _collect_github_files(extract_path)
+
+        updated = []
+        added = []
+
+        for rel_path, github_abs in github_files.items():
+            local_path = BOT_ROOT / rel_path
+            github_content = github_abs.read_bytes()
+
+            if local_path.exists():
+                if _file_hash(local_path) != hashlib.md5(github_content).hexdigest():
+                    local_path.write_bytes(github_content)
+                    updated.append(str(rel_path))
+                    logger.info(f"Обновлён: {rel_path}")
+            else:
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                local_path.write_bytes(github_content)
+                added.append(str(rel_path))
+                logger.info(f"Добавлен: {rel_path}")
+
+        return bool(updated or added), updated, added
+
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        logger.info("Кэш обновления удалён")
 
 
 @dataclass
@@ -105,10 +183,13 @@ class HelpSystem:
                         f"**{disabled_count}** {pluralize(disabled_count, 'модуль', 'модуля', 'модулей')} отключено — `.help disabled`"
                     )
 
-                lines.append("\nНапиши .**help** <**модуль**> для подробностей")
-                lines.append(" ")
-                lines.append("Отключить модуль: .**disable** <**модуль**>")
-                lines.append("Включить модуль: .**enable** <**модуль**>")
+                lines.append("\n**⚙️ Системные команды:**")
+                lines.append("• `.help` — список модулей и команд")
+                lines.append("• `.help <модуль>` — подробности о модуле")
+                lines.append("• `.help disabled` — отключённые модули")
+                lines.append("• `.disable <модуль>` — отключить модуль")
+                lines.append("• `.enable <модуль>` — включить модуль")
+                lines.append("• `.update` — проверить и установить обновления")
 
                 await event.edit("\n".join(lines))
                 logger.success(f"Команда {logger.accent('.help')} выполнена")
@@ -213,11 +294,55 @@ class HelpSystem:
             logger.info(f"Модуль {logger.accent(name)} включён")
             await event.edit(f"✅ Модуль **{name}** включён")
 
+        @client.on(events.NewMessage(outgoing=True, pattern=r"^\.update$"))
+        async def update_handler(event):
+            logger.info(f"Команда {logger.accent('.update')} запущена")
+            await event.edit("🔄 Проверяю обновления...")
+
+            try:
+                has_changes, updated, added = await event.loop.run_in_executor(
+                    None, run_update
+                )
+
+                if not has_changes:
+                    logger.success("Обновлений не найдено")
+                    await event.edit("✅ Обновлений не найдено — версия актуальна")
+                    return
+
+                lines = ["✅ **Обновление установлено!**\n"]
+
+                if updated:
+                    lines.append(f"📝 **Обновлено файлов:** {len(updated)}")
+                    for f in updated:
+                        lines.append(f"  • `{f}`")
+
+                if added:
+                    lines.append(f"\n➕ **Добавлено файлов:** {len(added)}")
+                    for f in added:
+                        lines.append(f"  • `{f}`")
+
+                lines.append("\n♻️ Перезапустите программу для применения изменений")
+
+                logger.success(
+                    f"Обновление завершено: {len(updated)} обновлено, {len(added)} добавлено"
+                )
+                await event.edit("\n".join(lines))
+
+            except requests.exceptions.ConnectionError:
+                logger.error("Нет подключения к GitHub")
+                await event.edit("❌ Нет подключения к интернету")
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"Ошибка GitHub: {e}")
+                await event.edit(f"❌ Ошибка при загрузке с GitHub: `{e}`")
+            except Exception as e:
+                logger.error(f"Ошибка обновления: {e}")
+                await event.edit(f"❌ Ошибка обновления: `{e}`")
+
         @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(\w+)"))
         async def unknown_command_handler(event):
             cmd = event.pattern_match.group(1)
 
-            known = {"help", "disable", "enable"}
+            known = {"help", "disable", "enable", "update"}
             for name, mod in loader.modules.items():
                 if name not in loader.disabled:
                     known.update(mod.commands.keys())
