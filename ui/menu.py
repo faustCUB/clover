@@ -27,7 +27,6 @@ def clear() -> None:
 def print_banner() -> None:
     console.print(Text(BANNER, style="bold #00ff88"), justify="left")
     console.print("[#00ff88]userbot   [#3a6b50]тгк: [#00ff88]@cloverUB[/]")
-    console.print("[#00ff88]api_id [#3a6b50]и [#00ff88]api_hash [#3a6b50]можно получить на сайте [#00ff88]my.telegram.org[/]")
     console.print()
 
 

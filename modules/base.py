@@ -1,4 +1,5 @@
 import re
+import asyncio
 import json
 import shutil
 import hashlib
@@ -300,7 +301,7 @@ class HelpSystem:
             await event.edit("🔄 Проверяю обновления...")
 
             try:
-                has_changes, updated, added = await event.loop.run_in_executor(
+                has_changes, updated, added = await asyncio.get_event_loop().run_in_executor(
                     None, run_update
                 )
 
