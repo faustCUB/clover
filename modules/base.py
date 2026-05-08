@@ -1,4 +1,5 @@
 import re
+import os
 import asyncio
 import json
 import shutil
@@ -17,6 +18,25 @@ REPO_OWNER = "faustCUB"
 REPO_NAME = "clover"
 BRANCH = "main"
 BOT_ROOT = Path(__file__).parent.parent.resolve()
+
+MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+ALIASES_FILE = os.path.join(MODULE_DIR, "aliases", "aliases.json")
+
+
+def load_aliases() -> dict:
+    path = Path(ALIASES_FILE)
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def save_aliases(aliases: dict) -> None:
+    path = Path(ALIASES_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(aliases, ensure_ascii=False, indent=2))
 
 
 def pluralize(n: int, one: str, few: str, many: str) -> str:
@@ -146,6 +166,33 @@ class BaseModule:
             f"Модуль {logger.accent(self.name)} загружен ({len(self.commands)} команд)"
         )
 
+    def register_aliases(self, client: TelegramClient, aliases: dict) -> None:
+        for alias, cmd in aliases.items():
+            if cmd not in self.commands:
+                continue
+            handler = self.commands[cmd]
+
+            def make_logged_handler(command, alias_name, original_handler):
+                async def logged_handler(event):
+                    chat = event.chat_id
+                    logger.info(
+                        f"Алиас {logger.accent('.' + alias_name)} > {logger.accent('.' + command)} > чат {logger.accent(str(chat))}"
+                    )
+                    try:
+                        await original_handler(event)
+                        logger.success(f"Алиас {logger.accent('.' + alias_name)} выполнен")
+                    except Exception as e:
+                        logger.error(f"Ошибка в алиасе .{alias_name}: {e}")
+                        raise
+
+                return logged_handler
+
+            client.add_event_handler(
+                make_logged_handler(cmd, alias, handler),
+                events.NewMessage(outgoing=True, pattern=rf"^\.{re.escape(alias)}(\s|$)"),
+            )
+            logger.info(f"Алиас {logger.accent('.' + alias)} > {logger.accent('.' + cmd)}")
+
 
 class HelpSystem:
     def __init__(self, loader):
@@ -184,19 +231,41 @@ class HelpSystem:
                         f"**{disabled_count}** {pluralize(disabled_count, 'модуль', 'модуля', 'модулей')} отключено — `.help disabled`"
                     )
 
+                aliases = load_aliases()
+                if aliases:
+                    lines.append(f"\n**🔗 Алиасы:** {len(aliases)} — `.help aliases`")
+
                 lines.append("\n**⚙️ Системные команды:**")
                 lines.append("• `.help` — список модулей и команд")
                 lines.append("• `.help <модуль>` — подробности о модуле")
                 lines.append("• `.help disabled` — отключённые модули")
+                lines.append("• `.help aliases` — список алиасов")
                 lines.append("• `.disable <модуль>` — отключить модуль")
                 lines.append("• `.enable <модуль>` — включить модуль")
                 lines.append("• `.update` — проверить и установить обновления")
+                lines.append("• `.alias <алиас> <команда>` — создать алиас")
+                lines.append("• `.unalias <алиас>` — удалить алиас")
 
                 await event.edit("\n".join(lines))
                 logger.success(f"Команда {logger.accent('.help')} выполнена")
                 return
 
             arg = args[1].lower()
+
+            if arg == "aliases":
+                logger.info(f"Команда {logger.accent('.help aliases')}")
+                aliases = load_aliases()
+                if not aliases:
+                    await event.edit("📭 Алиасов нет — создай: `.alias <алиас> <команда>`")
+                    return
+
+                lines = ["**🔗 Алиасы:**\n"]
+                for alias, cmd in sorted(aliases.items()):
+                    lines.append(f"• `.{alias}` > `.{cmd}`")
+                lines.append("\nУдалить: `.unalias <алиас>`")
+                await event.edit("\n".join(lines))
+                logger.success(f"Команда {logger.accent('.help aliases')} выполнена")
+                return
 
             if arg == "disabled":
                 logger.info(f"Команда {logger.accent('.help disabled')}")
@@ -240,6 +309,13 @@ class HelpSystem:
             for cmd in mod.commands:
                 lines.append(f"• `.{cmd}`")
 
+            aliases = load_aliases()
+            mod_aliases = [a for a, c in aliases.items() if c in mod.commands]
+            if mod_aliases:
+                lines.append("\n**Алиасы:**")
+                for a in mod_aliases:
+                    lines.append(f"• `.{a}` > `.{aliases[a]}`")
+
             if mod.examples:
                 lines.append("\n**Примеры:**")
                 for ex in mod.examples:
@@ -250,6 +326,60 @@ class HelpSystem:
 
             await event.edit("\n".join(lines))
             logger.success(f"Команда {logger.accent('.help')} выполнена")
+
+        @client.on(events.NewMessage(outgoing=True, pattern=r"^\.alias(\s.*)?$"))
+        async def alias_handler(event):
+            args = event.raw_text.strip().split(maxsplit=2)
+            if len(args) < 3:
+                await event.edit("❌ Использование: `.alias <алиас> <команда>`")
+                return
+
+            alias = args[1].lower()
+            cmd = args[2].lower()
+
+            if " " in cmd:
+                await event.edit(f"⚠️ Алиасы не поддерживают многословные команды типа `.{cmd}`")
+                return
+
+            all_commands = set()
+            for name, mod in loader.modules.items():
+                if name not in loader.disabled:
+                    all_commands.update(mod.commands.keys())
+
+            if cmd not in all_commands:
+                await event.edit(f"❌ Команда `.{cmd}` не найдена")
+                return
+
+            if alias in all_commands:
+                await event.edit(f"❌ `.{alias}` уже существует как команда модуля")
+                return
+
+            aliases = load_aliases()
+            aliases[alias] = cmd
+            save_aliases(aliases)
+
+            logger.info(f"Алиас {logger.accent('.' + alias)} > {logger.accent('.' + cmd)} создан")
+            await event.edit(f"🔗 Алиас `.{alias}` > `.{cmd}` создан\n♻️ Перезапустите программу для применения")
+
+        @client.on(events.NewMessage(outgoing=True, pattern=r"^\.unalias(\s+\S+)?$"))
+        async def unalias_handler(event):
+            args = event.raw_text.strip().split(maxsplit=1)
+            if len(args) < 2:
+                await event.edit("❌ Использование: `.unalias <алиас>`")
+                return
+
+            alias = args[1].lower()
+            aliases = load_aliases()
+
+            if alias not in aliases:
+                await event.edit(f"❌ Алиас `.{alias}` не найден")
+                return
+
+            del aliases[alias]
+            save_aliases(aliases)
+
+            logger.info(f"Алиас {logger.accent('.' + alias)} удалён")
+            await event.edit(f"🗑 Алиас `.{alias}` удалён\n♻️ Перезапустите программу для применения")
 
         @client.on(events.NewMessage(outgoing=True, pattern=r"^\.disable(\s+\S+)?$"))
         async def disable_handler(event):
@@ -322,7 +452,7 @@ class HelpSystem:
                     for f in added:
                         lines.append(f"  • `{f}`")
 
-                lines.append("\n♻️ Перезапустите программу для применения изменений")
+                lines.append("\n♻️ Перезапустите программу в Termux для применения изменений")
 
                 logger.success(
                     f"Обновление завершено: {len(updated)} обновлено, {len(added)} добавлено"
@@ -343,7 +473,9 @@ class HelpSystem:
         async def unknown_command_handler(event):
             cmd = event.pattern_match.group(1)
 
-            known = {"help", "disable", "enable", "update"}
+            aliases = load_aliases()
+            known = {"help", "disable", "enable", "update", "alias", "unalias"}
+            known.update(aliases.keys())
             for name, mod in loader.modules.items():
                 if name not in loader.disabled:
                     known.update(mod.commands.keys())

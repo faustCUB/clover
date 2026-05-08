@@ -25,8 +25,8 @@ def clear() -> None:
 
 
 def print_banner() -> None:
-    console.print(Text(BANNER, style="bold #00ff88"), justify="left")
-    console.print("[#00ff88]userbot   [#3a6b50]тгк: [#00ff88]@cloverUB[/]")
+    console.print(Text(BANNER, style="bold #00ff00"), justify="left")
+    console.print("[#00ff00]userbot   [#3a6b50]тгк: [#00ff88]@cloverUB[/]")
     console.print()
 
 
@@ -141,7 +141,7 @@ async def menu_loop() -> None:
             try:
                 api_id   = int(Prompt.ask("[#7ec8a0]  api_id  [/]").strip())
                 api_hash = Prompt.ask("[#7ec8a0]  api_hash[/]").strip()
-                phone    = Prompt.ask("[#7ec8a0]  номер   [/]").strip()
+                phone    = Prompt.ask("[#7ec8a0]  номер телефона[/]").strip()
                 password = Prompt.ask(
                     "[#7ec8a0]  2FA пароль[/] [#3a6b50](Enter — пропустить)[/]",
                     default=""
